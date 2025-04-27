@@ -1,0 +1,243 @@
+/**
+ * Auth0 authentication provider implementation
+ * @class Auth0Provider
+ */
+class Auth0Provider {
+  /**
+   * Creates an instance of Auth0Provider.
+   * @param {Object} config - Configuration for Auth0
+   * @param {string} config.domain - Auth0 domain
+   * @param {string} config.clientId - Auth0 client ID
+   * @param {string} config.redirectUri - Redirect URI after authentication
+   * @param {string} [config.audience] - API audience for token
+   * @param {Array|string} [config.scope] - OAuth scopes
+   */
+  constructor(config) {
+    this.domain = config.domain;
+    this.clientId = config.clientId;
+    this.redirectUri = config.redirectUri || window.location.origin;
+    this.audience = config.audience || '';
+    this.scope = config.scope || ['openid', 'profile', 'email'];
+    this.eventCallback = null;
+    this.client = null;
+  }
+
+  /**
+   * Set event callback handler
+   * @param {Function} callback - Event callback function
+   */
+  onEvent(callback) {
+    this.eventCallback = callback;
+  }
+
+  /**
+   * Emit events to the callback
+   * @param {string} event - Event name
+   * @param {Object} data - Event data
+   * @private
+   */
+  _emitEvent(event, data) {
+    if (this.eventCallback) {
+      this.eventCallback(event, data);
+    }
+  }
+
+  /**
+   * Initialize the Auth0 client
+   * @returns {Promise<Auth0Provider>} - This instance
+   */
+  async initialize() {
+    try {
+      await this._loadScript(`https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js`);
+      
+      this.client = await window.auth0.createAuth0Client({
+        domain: this.domain,
+        clientId: this.clientId,
+        authorizationParams: {
+          redirect_uri: this.redirectUri,
+          audience: this.audience,
+          scope: Array.isArray(this.scope) ? this.scope.join(' ') : this.scope
+        },
+        cacheLocation: 'localstorage', // Use localstorage for better persistence
+        useRefreshTokens: true // Enable refresh token rotation
+      });
+      
+      if (window.location.search.includes('code=') && 
+          window.location.search.includes('state=')) {
+        await this._handleRedirectCallback();
+      }
+      
+      const isAuthenticated = await this.client.isAuthenticated();
+      
+      if (isAuthenticated) {
+        const user = await this.client.getUser();
+        this._emitEvent('initialized', { authenticated: true, user });
+      } else {
+        this._emitEvent('initialized', { authenticated: false });
+      }
+      
+      return this;
+    } catch (error) {
+      this._emitEvent('error', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Load external script
+   * @param {string} src - Script URL
+   * @returns {Promise<void>} - Promise that resolves when script is loaded
+   * @private
+   */
+  _loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) {
+        resolve();
+        return;
+      }
+      
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      
+      script.onload = () => resolve();
+      script.onerror = (error) => reject(new Error(`Failed to load script: ${src}`));
+      
+      document.body.appendChild(script);
+    });
+  }
+
+  /**
+   * Handle redirect callback from Auth0
+   * @returns {Promise<Object>} - Auth0 result
+   * @private
+   */
+  async _handleRedirectCallback() {
+    try {
+      const result = await this.client.handleRedirectCallback();
+      const user = await this.client.getUser();
+      
+      window.history.replaceState({}, document.title, window.location.pathname);
+      
+      this._emitEvent('authenticated', { user });
+      
+      return result;
+    } catch (error) {
+      this._emitEvent('error', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Initiate login with redirect
+   * @param {Object} options - Login options
+   * @returns {Promise<boolean>} - Success status
+   */
+  async login(options = {}) {
+    try {
+      await this.client.loginWithRedirect({
+        authorizationParams: {
+          ...options
+        }
+      });
+      
+      return true;
+    } catch (error) {
+      this._emitEvent('error', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Initiate login with popup
+   * @param {Object} options - Login options
+   * @returns {Promise<Object>} - User profile
+   */
+  async loginWithPopup(options = {}) {
+    try {
+      await this.client.loginWithPopup({
+        authorizationParams: {
+          ...options
+        }
+      });
+      
+      const user = await this.client.getUser();
+      this._emitEvent('authenticated', { user });
+      
+      return user;
+    } catch (error) {
+      this._emitEvent('error', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Logout the user
+   * @param {Object} options - Logout options
+   * @param {string} [options.returnTo] - URL to redirect after logout
+   * @returns {Promise<boolean>} - Success status
+   */
+  async logout(options = {}) {
+    try {
+      await this.client.logout({
+        logoutParams: {
+          returnTo: options.returnTo || window.location.origin
+        }
+      });
+      
+      this._emitEvent('logout', {});
+      
+      return true;
+    } catch (error) {
+      this._emitEvent('error', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get access token silently
+   * @returns {Promise<string>} - Access token
+   */
+  async getAccessToken() {
+    try {
+      const token = await this.client.getTokenSilently();
+      return token;
+    } catch (error) {
+      // Handle token expiration specifically
+      if (error.error === 'login_required') {
+        this._emitEvent('session_expired', { error });
+      } else {
+        this._emitEvent('error', { error });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Check if user is authenticated
+   * @returns {Promise<boolean>} - Authentication status
+   */
+  async isAuthenticated() {
+    try {
+      return await this.client.isAuthenticated();
+    } catch (error) {
+      this._emitEvent('error', { error });
+      return false;
+    }
+  }
+
+  /**
+   * Get user profile
+   * @returns {Promise<Object>} - User profile
+   */
+  async getUserProfile() {
+    try {
+      return await this.client.getUser();
+    } catch (error) {
+      this._emitEvent('error', { error });
+      throw error;
+    }
+  }
+}
+
+export { Auth0Provider };
