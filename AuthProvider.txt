@@ -1,0 +1,184 @@
+import { Auth0Provider } from './Providers/Auth0Provider';
+
+/**
+ * Factory class for creating authentication provider instances
+ * @class AuthProvider
+ */
+class AuthProvider {
+  /**
+   * Creates an instance of AuthProvider.
+   * @param {Object} config - Configuration options
+   * @param {string} [config.providerType='auth0'] - Type of auth provider
+   * @param {Object} config.providerConfig - Provider-specific configuration
+   */
+  constructor(config = {}) {
+    this.providerType = config.providerType || 'auth0';
+    this.providerConfig = {
+      ...config.providerConfig
+    };
+    this.provider = null;
+    this.initialized = false;
+    this.eventListeners = {};
+    
+    this._initProvider();
+  }
+
+  /**
+   * Initialize the appropriate provider based on type
+   * @private
+   */
+  _initProvider() {
+    // Factory pattern for supporting multiple providers
+    switch (this.providerType) {
+      case 'auth0':
+        this.provider = new Auth0Provider(this.providerConfig);
+        break;
+      // Add other providers here in the future
+      // case 'okta':
+      //   this.provider = new OktaProvider(this.providerConfig);
+      //   break;
+      default:
+        throw new Error(`Unsupported provider type: ${this.providerType}`);
+    }
+    
+    this.provider.onEvent((event, data) => {
+      this._dispatchEvent(event, data);
+    });
+    
+    this.initialized = true;
+  }
+
+  /**
+   * Initialize the provider
+   * @returns {Promise<AuthProvider>} - This instance
+   */
+  async initialize() {
+    if (!this.provider) {
+      throw new Error('Provider not initialized');
+    }
+    
+    await this.provider.initialize();
+    return this;
+  }
+
+  /**
+   * Initiate login with redirect
+   * @param {Object} options - Login options
+   * @returns {Promise<boolean>} - Success status
+   */
+  async login(options = {}) {
+    if (!this.provider) {
+      throw new Error('Provider not initialized');
+    }
+    
+    return this.provider.login(options);
+  }
+
+  /**
+   * Initiate login with popup
+   * @param {Object} options - Login options
+   * @returns {Promise<Object>} - User profile
+   */
+  async loginWithPopup(options = {}) {
+    if (!this.provider) {
+      throw new Error('Provider not initialized');
+    }
+    
+    return this.provider.loginWithPopup(options);
+  }
+
+  /**
+   * Logout the user
+   * @param {Object} options - Logout options
+   * @returns {Promise<boolean>} - Success status
+   */
+  async logout(options = {}) {
+    if (!this.provider) {
+      throw new Error('Provider not initialized');
+    }
+    
+    return this.provider.logout(options);
+  }
+
+  /**
+   * Get access token
+   * @returns {Promise<string>} - Access token
+   */
+  async getAccessToken() {
+    if (!this.provider) {
+      throw new Error('Provider not initialized');
+    }
+    
+    return this.provider.getAccessToken();
+  }
+
+  /**
+   * Check if user is authenticated
+   * @returns {Promise<boolean>} - Authentication status
+   */
+  async isAuthenticated() {
+    if (!this.provider) {
+      throw new Error('Provider not initialized');
+    }
+    
+    return this.provider.isAuthenticated();
+  }
+
+  /**
+   * Get user profile
+   * @returns {Promise<Object>} - User profile
+   */
+  async getUserProfile() {
+    if (!this.provider) {
+      throw new Error('Provider not initialized');
+    }
+    
+    return this.provider.getUserProfile();
+  }
+
+  /**
+   * Register event listener
+   * @param {string} event - Event name
+   * @param {Function} callback - Event callback
+   */
+  on(event, callback) {
+    if (!this.eventListeners[event]) {
+      this.eventListeners[event] = [];
+    }
+    
+    this.eventListeners[event].push(callback);
+  }
+
+  /**
+   * Remove event listener
+   * @param {string} event - Event name
+   * @param {Function} callback - Event callback to remove
+   */
+  off(event, callback) {
+    if (!this.eventListeners[event]) {
+      return;
+    }
+    
+    this.eventListeners[event] = this.eventListeners[event].filter(
+      cb => cb !== callback
+    );
+  }
+
+  /**
+   * Dispatch event to all listeners
+   * @param {string} event - Event name
+   * @param {Object} data - Event data
+   * @private
+   */
+  _dispatchEvent(event, data) {
+    if (!this.eventListeners[event]) {
+      return;
+    }
+    
+    for (const callback of this.eventListeners[event]) {
+      callback(data);
+    }
+  }
+}
+
+export { AuthProvider };
